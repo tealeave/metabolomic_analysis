@@ -1,0 +1,280 @@
+# Metabolomics Pipeline Configuration
+# Biomarker discovery pipeline for maternal metabolomics analysis
+
+outcome: null  # To be overridden at runtime (e.g., outcome=sb, outcome=ptb, outcome=sga, outcome=eope, outcome=lope)
+
+# Data source configuration
+data_source: "s3"  # Options: "s3" (default) or "local"
+
+defaults:
+  - paired_alignment: paired_alignment_maternal
+
+# Spark Configuration
+spark:
+  app_name: "metabolomics-biomarker-discovery"
+  master: "local[*]"  # Override in Databricks environment
+  config:
+    spark.sql.adaptive.enabled: "true"
+    spark.sql.adaptive.coalescePartitions.enabled: "true"
+    spark.sql.adaptive.skewJoin.enabled: "true"
+    spark.serializer: "org.apache.spark.serializer.KryoSerializer"
+    spark.sql.extensions: "io.delta.sql.DeltaSparkSessionExtension"
+    spark.sql.catalog.spark_catalog: "org.apache.spark.sql.delta.catalog.DeltaCatalog"
+
+# Database and Storage Configuration
+database:
+  project_name: "002sap22p032-momi-meta-analysis"
+  data_analysis_path: "s3://sapbio-client-prod-002sap22p032-momi-meta/04_data_analysis/Analysis_w_updated_metadata"
+  project_deliverables_path: "s3://sapbio-client-prod-002sap22p032-momi-meta/05_project_deliverables"
+  
+# Pipeline Paths Configuration
+paths:
+  # Local data paths (used when data_source: "local")
+  local:
+    base_dir: "data"
+    metadata:
+      dec_2024_metadata: "${paths.local.base_dir}/metadata/MOMI_derived_data_dec5.csv"
+      may_2024_metadata: "${paths.local.base_dir}/metadata/MOMI_derived_data_05_02_2024.csv"
+      all_variable_dict: "${paths.local.base_dir}/metadata/MOMI_All_Variables_Final_Draft_by_PI.xlsx"
+      new_adjudicated_variable_dict: "${paths.local.base_dir}/metadata/MOMI_Derived_variables_new_ajudication.xlsx"
+    manifests:
+      amanhi_bangladesh: "${paths.local.base_dir}/manifests/amanhi-bangladesh-manifest.xlsx"
+      amanhi_pakistan: "${paths.local.base_dir}/manifests/amanhi-pakistan-manifest.xlsx"
+      amanhi_tanzania: "${paths.local.base_dir}/manifests/amanhi-tanzania-manifest.xlsx"
+      gapps_bangladesh: "${paths.local.base_dir}/manifests/gapps-bangladesh-manifest.xlsx"
+      gapps_zambia: "${paths.local.base_dir}/manifests/gapps-zambia-manifest.xlsx"
+    intensity_data:
+      amanhi_bangladesh: "${paths.local.base_dir}/intensity_data/amanhi_bangladesh/"
+      amanhi_pakistan: "${paths.local.base_dir}/intensity_data/amanhi_pakistan/"
+      amanhi_tanzania: "${paths.local.base_dir}/intensity_data/amanhi_tanzania/"
+      gapps_bangladesh: "${paths.local.base_dir}/intensity_data/gapps_bangladesh/"
+      gapps_zambia: "${paths.local.base_dir}/intensity_data/gapps_zambia/"
+    results: "${paths.local.base_dir}/results"
+
+  # Statistical analysis cutoffs
+  statistical_analysis_cutoffs:
+    individual_sites:
+      fdr: 0.1
+    meta_analysis:
+      fdr: 0.05
+      pval_for_additional_highlight_filter: 0.05
+
+  # Metadata paths
+  metadata:
+    dec_2024_metadata: "${database.data_analysis_path}/meta_data/MOMI_derived_data_dec5.csv"
+    may_2024_metadata: "${database.data_analysis_path}/meta_data/MOMI_derived_data_05_02_2024.csv"
+    all_variable_dict: "${database.data_analysis_path}/meta_data/MOMI_All_Variables_Final_Draft_by_PI.xlsx"
+    new_adjudicated_variable_dict: "${database.data_analysis_path}/meta_data/MOMI_Derived_variables_new_ajudication.xlsx"
+
+  # Manifest paths (Kim's original manifests)
+  manifest_kim:
+    amanhi_bangladesh: "${database.data_analysis_path}/manifest_kim/amanhi-bangladesh-synapse-meta-metabolomics-sample-manifest-mapping-key-full-final.xlsx"
+    amanhi_pakistan: "${database.data_analysis_path}/manifest_kim/amanhi-pakistan-synapse-meta-metabolomics-sample-manifest-mapping-key-full-final.xlsx"
+    amanhi_tanzania: "${database.data_analysis_path}/manifest_kim/amanhi-tanzania-synapse-meta-metabolomics-sample-manifest-mapping-key-full-final.xlsx"
+    gapps_bangladesh: "${database.data_analysis_path}/manifest_kim/gapps-bangladesh-synapse-meta-metabolomics-sample-manifest-mapping-key-full-final.xlsx"
+    gapps_zambia: "${database.data_analysis_path}/manifest_kim/gapps-zambia-synapse-meta-metabolomics-sample-manifest-mapping-key-full-final.xlsx"
+    gapps_zambia_05_07_2024: "${database.data_analysis_path}/manifest_kim/gapps-zambia-synapse-meta-metabolomics-sample-manifest-mapping-key-full-final_05_07_2024.csv"
+
+  # Cleaned manifest paths
+  manifest_cleaned:
+    amanhi_bangladesh: "${database.data_analysis_path}/manifest_cleaned/amanhi-bangladesh-cleaned-manifest.csv"
+    amanhi_pakistan: "${database.data_analysis_path}/manifest_cleaned/amanhi-pakistan-cleaned-manifest.csv"
+    amanhi_tanzania: "${database.data_analysis_path}/manifest_cleaned/amanhi-tanzania-cleaned-manifest.csv"
+    gapps_bangladesh: "${database.data_analysis_path}/manifest_cleaned/gapps-bangladesh-cleaned-manifest.csv"
+    gapps_zambia: "${database.data_analysis_path}/manifest_cleaned/gapps-zambia-cleaned-prelim-manifest.csv"
+
+  # Combined manifest and stratified data
+  combined_manifest:
+    base: "${database.data_analysis_path}/manifest_cleaned"
+    flowchart_counts:
+      case_df: "${paths.combined_manifest.base}/${outcome}/${outcome}_cases.csv"
+      non_case_df: "${paths.combined_manifest.base}/${outcome}/${outcome}_non_cases.csv"
+      control_df: "${paths.combined_manifest.base}/${outcome}/${outcome}_controls.csv"
+    combined_imputed_metadata: "${paths.combined_manifest.base}/combined_imputed_metadata.csv"
+    stratified_metadata:
+      base: "${paths.combined_manifest.base}/${outcome}_20wk_stratified_metadata"
+      all: "${paths.combined_manifest.stratified_metadata.base}.csv"
+      uniq_id: "${paths.combined_manifest.stratified_metadata.base}_uniq_id.csv"
+
+  # File manifest
+  file_manifest:
+    base: "${database.data_analysis_path}/file_manifest"
+    outcome_manifest: "${paths.file_manifest.base}/${outcome}_file_manifest.csv"
+
+  # Analysis results
+  analysis:
+    regression_analysis:
+      previous_results:
+        base: "${database.data_analysis_path}/combined_analysis_results"
+        sig_mtbs_with_alignment_info: "${paths.analysis.regression_analysis.previous_results.base}/${outcome}_sig_mtbs_meta_pooled_w_alignment_info.csv"
+      pooled_analysis:
+        base: "${database.data_analysis_path}/regression_analysis/pooled_analysis"
+        input_delta_tables:
+          base_with_outcome: "${paths.analysis.regression_analysis.pooled_analysis.base}/${outcome}/input_delta_tables"
+          path: "${paths.analysis.regression_analysis.pooled_analysis.input_delta_tables.base_with_outcome}/${outcome}_regression_analysis.delta/"
+        pooled_regression_results:
+          base_with_regression_results: "${paths.analysis.regression_analysis.pooled_analysis.base}/${outcome}/pooled_regression_results"
+          pooled_regression_noncase_lt20: "${paths.analysis.regression_analysis.pooled_analysis.pooled_regression_results.base_with_regression_results}/${outcome}_pooled_regression_noncase_lt20.csv"
+          pooled_regression_noncase_gte20: "${paths.analysis.regression_analysis.pooled_analysis.pooled_regression_results.base_with_regression_results}/${outcome}_pooled_regression_noncase_gte20.csv"
+          pooled_regression_control_lt20: "${paths.analysis.regression_analysis.pooled_analysis.pooled_regression_results.base_with_regression_results}/${outcome}_pooled_regression_control_lt20.csv"
+          pooled_regression_control_gte20: "${paths.analysis.regression_analysis.pooled_analysis.pooled_regression_results.base_with_regression_results}/${outcome}_pooled_regression_control_gte20.csv"
+      comparing_to_old_results:
+        base: "${database.data_analysis_path}/regression_analysis/comparing_to_old_regression_results"
+        pooled_sig_mtbs_comparison: "${paths.analysis.regression_analysis.comparing_to_old_results.base}/${outcome}_pooled_sig_mtbs_comparison.csv"
+
+# Site-specific intensity data configuration
+sites:
+  amanhi_bangladesh:
+    project_name: "002sap22p029-momi-amanhi-bangladesh"
+    data_analysis_path: "s3://sapbio-client-prod-002sap22p029-momi-amanhi-bangladesh/04_data_analysis"
+    project_deliverables_path: "s3://sapbio-client-prod-002sap22p029-momi-amanhi-bangladesh/05_project_deliverables"
+    intensity_data: "${sites.amanhi_bangladesh.data_analysis_path}/data/maternal_intensities_preprocessed_long.delta/"
+    feature_metadata: "${sites.amanhi_bangladesh.project_deliverables_path}/packaged_external/samples_maternal_plasma/maternal_feature_metadata_and_global_id_revised.csv"
+    sample_metadata: "${sites.amanhi_bangladesh.project_deliverables_path}/packaged_internal/samples_maternal_plasma/sample_metadata.csv"
+
+  gapps_bangladesh:
+    project_name: "002sap22p028-momi-gapps-bangladesh"
+    data_analysis_path: "s3://sapbio-client-prod-002sap22p028-momi-gapps-bangladesh/04_data_analysis"
+    project_deliverables_path: "s3://sapbio-client-prod-002sap22p028-momi-gapps-bangladesh/05_project_deliverables"
+    intensity_data: "${sites.gapps_bangladesh.data_analysis_path}/data/maternal_intensities_preprocessed_long.delta/"
+    feature_metadata: "${sites.gapps_bangladesh.project_deliverables_path}/rLC/maternal/002sap22p028_maternal_plasma_feature_metadata_appended_global_id.csv"
+    sample_metadata: "${sites.gapps_bangladesh.data_analysis_path}/packaging/rLC/maternal/sample_metadata.csv"
+
+  amanhi_tanzania:
+    project_name: "002sap22p031-momi-amanhi-tanzania"
+    data_analysis_path: "s3://sapbio-client-prod-002sap22p031-momi-amanhi-tanzania/04_data_analysis"
+    project_deliverables_path: "s3://sapbio-client-prod-002sap22p031-momi-amanhi-tanzania/05_project_deliverables"
+    intensity_data: "${sites.amanhi_tanzania.data_analysis_path}/data/maternal_intensities_preprocessed_long.delta/"
+    feature_metadata: "${sites.amanhi_tanzania.project_deliverables_path}/rLC/maternal/002sap22p031_maternal_plasma_feature_metadata_with_glboal_id.csv"
+    sample_metadata: "${sites.amanhi_tanzania.data_analysis_path}/packaging/rLC/maternal/sample_metadata.csv"
+
+  amanhi_pakistan:
+    project_name: "002sap22p030-momi-amanhi-pakistan"
+    data_analysis_path: "s3://sapbio-client-prod-002sap22p030-momi-amanhi-pakistan/04_data_analysis"
+    project_deliverables_path: "s3://sapbio-client-prod-002sap22p030-momi-amanhi-pakistan/05_project_deliverables"
+    intensity_data: "${sites.amanhi_pakistan.data_analysis_path}/data/maternal_intensities_preprocessed_long.delta/"
+    feature_metadata: "${sites.amanhi_pakistan.project_deliverables_path}/momi_amanhi_pakistan_maternal_plasma_feature_metadata_global_id.csv"
+    sample_metadata: "${sites.amanhi_pakistan.data_analysis_path}/separated_reextraction_packaging/internal/maternalinternal_sample_metadata.csv"
+
+  gapps_zambia:
+    project_name: "002sap22p027-momi-gapps-zambia"
+    data_analysis_path: "s3://sapbio-client-prod-002sap22p027-momi-gapps-zambia/04_data_analysis"
+    project_deliverables_path: "s3://sapbio-client-prod-002sap22p027-momi-gapps-zambia/05_project_deliverables"
+    intensity_data: "${sites.gapps_zambia.data_analysis_path}/data/maternal_intensities_preprocessed_long.delta/"
+    feature_metadata: "${sites.gapps_zambia.project_deliverables_path}/rLC/maternal/002sap22p027_maternal_plasma_feature_metadata_appended_global_id.csv"
+    sample_metadata: "${sites.gapps_zambia.data_analysis_path}/packaging/rLC/maternal/sample_metadata.csv"
+
+# Paired alignment configuration
+paired_alignment:
+  alignment:
+    melted_paired_alignment_uniq_to_site_long_format: "s3://sapbio-client-prod-002sap22p032-momi-meta/04_data_analysis/Analysis_w_updated_metadata/alignment_data/momi_melted_paired_alignment_uniq_to_site_long_format.delta/"
+    deduplicated_global_id_file: "s3://sapbio-client-prod-002sap22p032-momi-meta/04_data_analysis/Analysis_w_updated_metadata/alignment_data/deduplicated_global_id_file.csv"
+
+# Pipeline processing parameters
+processing:
+  # Columns to impute during metadata processing
+  binary_columns_to_impute:
+    - "chron_htn"
+    - "diabetes"
+    - "fetal_anomalies"
+    - "cong_anomalies"
+    - "syphilis"
+    - "hiv"
+    - "malaria"
+    - "tb"
+  
+  # Columns needed for regression analysis
+  regression_columns:
+    - "sample_id"
+    - "orig_id"
+    - "site"
+    - "pe_new"
+    - "pe_priority"
+    - "pe_cat"
+    - "sb_new"
+    - "ptb_new"
+    - "severe_ptb"
+    - "sga_3"
+    - "sga_10"
+    - "mat_height"
+    - "mat_weight"
+    - "bwt_centile_new"
+    - "chron_htn"
+    - "diabetes"
+    - "pw_age"
+    - "bmi"
+  
+  # Gestational age stratification
+  ga_stratification:
+    lt20_threshold: 20
+    gte20_threshold: 20
+  
+  # Site name mappings
+  site_mappings:
+    "AMANHIB": "amanhi_bangladesh"
+    "GAPPSB": "gapps_bangladesh"
+    "ZAPPS": "gapps_zambia"
+    "AMANHIP": "amanhi_pakistan"
+    "AMANHIT": "amanhi_tanzania"
+
+# Biomarker discovery settings
+biomarker_discovery:
+  # Multiple testing correction
+  multiple_testing:
+    method: "fdr_bh"  # Options: fdr_bh, bonferroni, holm
+    alpha: 0.05
+    separate_by_compound_class: true
+    
+  # Regression analysis settings
+  regression:
+    min_sample_size: 10
+    covariates:
+      - "pw_age"
+      - "bmi"
+      - "chron_htn"
+      - "diabetes"
+    value_to_encode_as_1: true
+    
+  # Results filtering
+  results_filtering:
+    significance_threshold: 0.05
+    effect_size_threshold: 0.1
+    min_observations: 50
+
+# Outcome-specific definitions
+outcomes:
+  eope:
+    outcome_column: "pe_new"
+    case_definition: "pe_new == 1 and pe_cat == 'EOPE'"
+    priority_filter: "pe_priority.isin([1, 2])"
+    description: "Early-onset preeclampsia"
+    
+  lope:
+    outcome_column: "pe_new"
+    case_definition: "pe_new == 1 and pe_cat == 'LOPE'"
+    priority_filter: "pe_priority.isin([1, 2])"
+    description: "Late-onset preeclampsia"
+    
+  sb:
+    outcome_column: "sb_new"
+    case_definition: "sb_new == 1"
+    priority_filter: "sb_priority.isin([1, 2])"
+    description: "Stillbirth"
+    
+  ptb:
+    outcome_column: "ptb_new"
+    case_definition: "ptb_new == 1"
+    priority_filter: null
+    description: "Preterm birth"
+    
+  sga:
+    outcome_column: "sga_10"
+    case_definition: "sga_10 == 1"
+    priority_filter: null
+    description: "Small for gestational age (10th percentile)"
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/metabolomics_pipeline.log"
