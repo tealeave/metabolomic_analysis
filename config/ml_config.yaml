@@ -1,0 +1,354 @@
+# Machine Learning Pipeline Configuration
+# Risk prediction pipeline using selected biomarkers from metabolomics discovery
+
+# Inherit basic configuration
+outcome: null  # To be overridden at runtime (e.g., outcome=sb, outcome=ptb, outcome=sga, outcome=eope, outcome=lope)
+
+# Data source configuration  
+data_source: "s3"  # Options: "s3" (default) or "local"
+
+# Spark Configuration for ML Pipeline
+spark:
+  app_name: "ml-risk-prediction"
+  master: "local[*]"  # Override in Databricks environment
+  config:
+    spark.sql.adaptive.enabled: "true"
+    spark.serializer: "org.apache.spark.serializer.KryoSerializer"
+    spark.sql.extensions: "io.delta.sql.DeltaSparkSessionExtension"
+    spark.sql.catalog.spark_catalog: "org.apache.spark.sql.delta.catalog.DeltaCatalog"
+
+# Input data paths
+input_data:
+  # Processed metadata from metabolomics pipeline
+  metabolomics_results: "${database.data_analysis_path}/regression_analysis/pooled_analysis/${outcome}/pooled_regression_results/"
+  biomarker_results: "${database.data_analysis_path}/combined_analysis_results/${outcome}_sig_mtbs_meta_pooled_w_alignment_info.csv"
+  
+  # Intensity data for selected biomarkers
+  intensity_data_base: "${database.data_analysis_path}/regression_analysis/pooled_analysis/${outcome}/input_delta_tables/${outcome}_regression_analysis.delta/"
+
+# Biomarker selection configuration
+biomarker_selection:
+  # Selection modes: user_specified, top_n, criteria, auto
+  default_mode: "auto"
+  
+  # User-specified biomarkers (when mode=user_specified)
+  user_biomarkers: []  # To be provided by user
+  
+  # Top N selection (when mode=top_n)
+  top_n:
+    count: 50
+    ranking_criterion: "p_value_corrected"  # or "effect_size", "significance"
+    ascending: true  # true for p-values, false for effect sizes
+    
+  # Criteria-based selection (when mode=criteria)  
+  criteria:
+    p_value_threshold: 0.05
+    effect_size_threshold: 0.1
+    min_observations: 50
+    
+  # Auto selection (when mode=auto)
+  auto:
+    max_features: 100
+    p_value_threshold: 0.05
+    prefer_annotated: true
+    balance_compound_classes: true
+
+# Machine Learning Configuration for Metabolomic Analysis Pipeline
+
+# ML-specific settings
+ml:
+  # Random seeds for reproducibility
+  random_state: 1500
+  
+  # Cross-validation settings
+  cross_validation:
+    n_splits: 6  # Including lockbox holdout
+    stratification:
+      by_outcome: true
+      by_site: true
+      by_timepoints: true
+    
+  # Feature selection settings
+  feature_selection:
+    fdr_cutoff: 0.05
+    max_features: 100
+    sort_by_significance: true
+    
+  # Dataset types for ML
+  dataset_types:
+    biosample:
+      description: "Biosample-level analysis (maximizes data usage)"
+      covariates:
+        base: ["bmi", "maternal_age", "alcohol_history", "n_previous_miscarriage", 
+               "n_previous_pregnancies", "n_previous_stillbirth", "smoking_exposure",
+               "smoking_history", "tobacco_history", "wealth_index"]
+        additional: ["chronic_hypertension", "diabetes", "hiv", "malaria", "syphilis", "tuberculosis"]
+        temporal: ["ga_sample_days"]
+    
+    subject:
+      description: "Subject-level analysis using AUC features"
+      covariates:
+        base: ["bmi", "maternal_age", "alcohol_history", "n_previous_miscarriage", 
+               "n_previous_pregnancies", "n_previous_stillbirth", "smoking_exposure",
+               "smoking_history", "tobacco_history", "wealth_index"]
+        additional: ["chronic_hypertension", "diabetes", "hiv", "malaria", "syphilis", "tuberculosis"]
+        temporal: ["first_timepoint", "time_delta"]
+    
+    window:
+      description: "GA window-based analysis"
+      covariates:
+        base: ["bmi", "maternal_age", "alcohol_history", "n_previous_miscarriage", 
+               "n_previous_pregnancies", "n_previous_stillbirth", "smoking_exposure",
+               "smoking_history", "tobacco_history", "wealth_index"]
+        additional: ["chronic_hypertension", "diabetes", "hiv", "malaria", "syphilis", "tuberculosis"]
+        temporal: ["ga_sample_days"]
+  
+  # Population stratification
+  populations:
+    all:
+      description: "All available samples"
+      filter_condition: null
+    
+    healthy_control:
+      description: "Healthy control population"
+      filter_condition: "healthy_control == True"
+      excludes_additional_covariates: true
+    
+    high_risk:
+      description: "High risk population"
+      filter_condition: "high_risk == True"
+    
+    high_risk_broad:
+      description: "Broad high risk population"
+      filter_condition: "high_risk_broad == True"
+
+# Preprocessing settings
+preprocessing:
+  batch_correction:
+    method: "median_centering"  # intensity - site_median + global_median
+    use_training_stats: true
+    
+  scaling:
+    method: "standard"  # StandardScaler
+    
+  missing_values:
+    strategy: "drop_features"  # Drop features with any missing values
+    threshold: 0.0  # No tolerance for missing values
+    
+  undersampling:
+    methods: ["random", "near_miss", "tomek"]
+    strategies:
+      random:
+        sampling_strategy: "auto"  # Will be optimized
+      near_miss:
+        versions: [1, 2, 3]
+        n_jobs: 4
+      tomek:
+        n_jobs: 4
+
+# Model configurations
+models:
+  xgboost:
+    base_params:
+      eval_metric: "aucpr"
+      n_jobs: 4
+      random_state: 42
+    
+    hyperparameter_ranges:
+      # Class balancing
+      scale_pos_weight:
+        type: "float"
+        low: 1.0
+        high: 10.0  # Will be dynamically adjusted based on class ratio
+      
+      # Core hyperparameters
+      max_depth:
+        type: "int"
+        low: 2
+        high: 6
+      
+      learning_rate:
+        type: "float"
+        low: 0.01
+        high: 0.3
+        log: true
+      
+      n_estimators:
+        type: "int"
+        low: 5
+        high: 45
+      
+      # Regularization
+      gamma:
+        type: "float"
+        low: 0.0
+        high: 5.0
+      
+      reg_lambda:
+        type: "float"
+        low: 1e-8
+        high: 1.0
+        log: true
+      
+      reg_alpha:
+        type: "float"
+        low: 1e-8
+        high: 1.0
+        log: true
+      
+      # Additional parameters
+      min_child_weight:
+        type: "int"
+        low: 1
+        high: 300
+      
+      subsample:
+        type: "float"
+        low: 0.5
+        high: 1.0
+      
+      colsample_bytree:
+        type: "float"
+        low: 0.5
+        high: 1.0
+    
+    early_stopping:
+      enabled: true
+      rounds_range:
+        low: 3
+        high: 6
+
+# Hyperparameter optimization
+optimization:
+  framework: "optuna"
+  
+  study_settings:
+    direction: "maximize"
+    n_trials: 150
+    timeout: 7200  # 2 hours
+    
+  objective_function:
+    primary_metric: "PPV_val"  # Positive Predictive Value
+    secondary_metric: "MCC_val"  # Matthews Correlation Coefficient
+    weights:
+      ppv: 1.0
+      mcc: 0.0  # Can be adjusted for multi-objective optimization
+    
+  pruning:
+    enabled: true
+    min_trials: 20
+
+# Evaluation metrics
+metrics:
+  classification:
+    - "TN"  # True Negatives
+    - "FP"  # False Positives  
+    - "FN"  # False Negatives
+    - "TP"  # True Positives
+    - "F1 Score"
+    - "AUROC"  # Area Under ROC Curve
+    - "AUPRC"  # Area Under Precision-Recall Curve
+    - "PPV"    # Positive Predictive Value (Precision)
+    - "NPV"    # Negative Predictive Value
+    - "Sensitivity"  # Recall/True Positive Rate
+    - "Specificity"  # True Negative Rate
+    - "MCC"    # Matthews Correlation Coefficient
+  
+  primary_metrics:
+    cross_validation: "PPV_val"
+    lockbox: "MCC_val"
+
+# Outcome-specific configurations
+outcomes:
+  eope:
+    outcome_column: "eope"
+    case_definition: "eope == 1"
+    priority_filter: "pe_priority.isin([1, 2]) and pe_cat == 'EOPE'"
+    
+  lope:
+    outcome_column: "lope" 
+    case_definition: "lope == 1"
+    priority_filter: "pe_priority.isin([1, 2]) and pe_cat == 'LOPE'"
+    
+  sb:
+    outcome_column: "sb_new"
+    case_definition: "sb_new == 1"
+    priority_filter: "sb_priority.isin([1, 2])"
+    
+  ptb:
+    outcome_column: "ptb_new"
+    case_definition: "ptb_new == 1"
+    priority_filter: null
+    
+  sga:
+    outcome_column: "sga_10"
+    case_definition: "sga_10 == 1"
+    priority_filter: null
+
+# Clinical definitions
+clinical:
+  healthy_control_criteria:
+    - "outcome == 0"  # Not the outcome of interest
+    - "ga_birth_days >= 273"  # Born at term (39+ weeks)
+    - "ga_birth_days < 287"   # Born before 41 weeks
+    - "birth_weight >= 2500"  # Normal birth weight
+    - "chronic_hypertension != 1"  # No chronic hypertension
+    - "diabetes != 1"         # No diabetes
+    - "fetal_anomalies != 1"  # No fetal anomalies
+    - "congenital_anomalies != 1"  # No congenital anomalies
+    - "syphilis not in [1, 2]"     # No syphilis
+    - "hiv != 1"              # No HIV
+    - "malaria != 1"          # No malaria
+    - "tuberculosis != 1"     # No tuberculosis
+  
+  high_risk_criteria:
+    - "maternal_age >= 35"    # Advanced maternal age
+    - "smoking_history.isin([2, 3, 4])"  # Smoking during pregnancy
+    - "alcohol_history.isin([2, 3, 4])"  # Alcohol during pregnancy
+    - "chronic_hypertension == 1"  # Chronic hypertension
+    - "diabetes == 1"         # Diabetes
+    - "syphilis.isin([1, 2])" # Syphilis infection
+    - "hiv == 1"              # HIV infection
+    - "malaria == 1"          # Malaria infection
+    - "tuberculosis == 1"     # Tuberculosis infection
+    - "bmi >= 30"             # Obesity
+  
+  high_risk_broad_criteria:
+    # Includes all high_risk criteria plus:
+    - "n_previous_pregnancies == 0"  # Nulliparous
+    - "smoking_exposure == 1"         # Passive smoking
+    - "n_previous_miscarriage > 0"    # Previous miscarriage
+    - "n_previous_stillbirth > 0"     # Previous stillbirth
+    - "wealth_index.isin([1, 2])"     # Low socioeconomic status
+
+# AUC-specific settings for subject-level analysis
+auc_analysis:
+  time_delta_threshold: 28  # Minimum days between first and last timepoint
+  baseline_method: "first_timepoint"  # Use first timepoint as baseline for AUC
+  normalization: "time_delta"  # Normalize AUC by time delta
+  
+  ga_window:
+    window_size_days: 120  # 4-month window
+    optimal_start_day: 63  # ~9-17 weeks gestation
+    
+# Output settings
+output:
+  model_storage:
+    format: "pickle"
+    include_metadata: true
+    
+  results_format:
+    cross_validation: "csv"
+    lockbox: "csv"
+    feature_importance: "csv"
+    
+  visualization:
+    save_plots: true
+    formats: ["png", "pdf"]
+    dpi: 300
+
+# Logging settings
+logging:
+  level: "INFO"
+  include_hyperopt_details: false
+  save_optuna_study: true
